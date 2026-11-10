@@ -1,0 +1,6 @@
+{
+  "name": "token-usage-weather",
+  "version": "0.1.0",
+  "description": "전체 세션의 토큰 사용량(캐시 제외)을 오늘 날씨와 누적으로 프롬프트 위 띠에 보여 준다",
+  "types": "./types/index.d.ts"
+}

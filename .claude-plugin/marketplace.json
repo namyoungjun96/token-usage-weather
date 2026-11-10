@@ -1,0 +1,5 @@
+{
+  "name": "token-usage-weather",
+  "owner": { "name": "namyoungjun96" },
+  "plugins": [{ "name": "token-usage-weather", "source": "./" }]
+}
