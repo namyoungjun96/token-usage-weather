@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
 
-import type { Summary } from '../types'
+import type { Limits, Summary } from '../types'
 
 const summary = atom({ plugin: 'token-usage-weather', key: 'summary' } as const, null)
+const limits = atom({ plugin: 'token-usage-weather', key: 'limits' } as const, null)
 
 // 오늘 사용량(캐시 제외 input + output) 기준 날씨
 const FORECASTS = [
@@ -15,6 +16,11 @@ const FORECASTS = [
 ]
 const SPARKS = '▁▂▃▄▅▆▇█'
 const WIDE = 64
+
+// 한도 사용률: 50% 미만 기본색, 80% 미만 노랑, 그 이상 빨강 + 특보
+const WARN = 80
+const ALERT = 95
+const MOONS = ['○', '◔', '◑', '◕', '●']
 
 const forecast = (tokens: number) => FORECASTS.find(f => tokens < f.below)!
 
@@ -30,6 +36,20 @@ const sparkline = (values: number[]) => {
 
 const daysSince = (since: string, today: string) =>
   Math.round((Date.parse(today) - Date.parse(since)) / 86_400_000) + 1
+
+const levelColor = (pct: number) =>
+  pct >= WARN ? '#f2685c' : pct >= 50 ? '#f2c94c' : undefined
+
+// 주간 한도는 달 모양: 많이 쓸수록 달이 찬다
+const moon = (pct: number) =>
+  MOONS[Math.max(0, Math.min(MOONS.length - 1, Math.round((pct / 100) * (MOONS.length - 1))))]
+
+const percent = (pct: number) => `${Math.round(pct)}%`
+
+const toLimits = (windows: SessionRateLimit[]): Limits => ({
+  fiveHour: windows.find(w => w.kind === 'five_hour')?.percentUsed ?? null,
+  weekly: windows.find(w => w.kind === 'seven_day')?.percentUsed ?? null,
+})
 
 let isRefreshing = false
 
@@ -53,7 +73,20 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     void refresh($)
+    try {
+      const { rateLimits } = await $.session.usage()
+      if (rateLimits.length > 0) await update($, limits, () => toLimits(rateLimits))
+    } catch {
+    }
     return result
+  })
+
+  // 한도 사용률은 응답마다 엔진이 알려 준다
+  on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('rateLimits')) {
+      await update($, limits, () => toLimits(e.rateLimits))
+    }
+    return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -67,11 +100,14 @@ export const register: Register = on => {
     if (e.props.hasSurvey || s === null) {
       return next(e)
     }
+    const l = await read($, limits)
 
     const { Box, Text } = $.ui.resolve(e)
     const f = forecast(s.today)
     const today = s.week.at(-1)?.date ?? s.since
     const isWide = e.props.bodyColumns >= WIDE
+    const fiveHour = l?.fiveHour ?? null
+    const weekly = l?.weekly ?? null
 
     return (
       <Box>
@@ -81,6 +117,16 @@ export const register: Register = on => {
         <Text dimColor>{'  │  '}</Text>
         <Text>누적 {compact(s.total)}</Text>
         {isWide ? <Text dimColor>{'  '}(D+{daysSince(s.since, today)})</Text> : null}
+        {fiveHour !== null || weekly !== null ? <Text dimColor>{'  │  '}</Text> : null}
+        {fiveHour === null ? null
+          : fiveHour >= WARN
+            ? <Text color={levelColor(fiveHour)} bold>⚠ {fiveHour >= ALERT ? '호우경보' : '호우주의보'} {percent(fiveHour)}</Text>
+            : <Text color={levelColor(fiveHour)}>강수 {percent(fiveHour)}</Text>}
+        {fiveHour !== null && weekly !== null ? <Text>{'  '}</Text> : null}
+        {weekly === null ? null
+          : <Text color={levelColor(weekly)} bold={weekly >= WARN}>
+              {weekly >= WARN ? '⚠ ' : ''}{moon(weekly)} {isWide ? '주간 ' : ''}{percent(weekly)}
+            </Text>}
       </Box>
     )
   })
