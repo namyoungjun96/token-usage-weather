@@ -1,3 +1,19 @@
 {
-  "extends": "./.claude-plugin/types/tsconfig.json"
+  // .claude-plugin/types/ 는 Claude Code가 이 모드를 불러올 때 만드는 API 선언이라 저장소에 없다 (.gitignore).
+  // 클론 직후 만드는 방법은 README의 "개발" 절 참고.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "types": [],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment"
+  },
+  "include": [".claude-plugin/types", "hooks", "types", "tests"]
 }
