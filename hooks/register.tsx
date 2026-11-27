@@ -5,6 +5,7 @@ import type { Limits, Summary } from '../types'
 
 const summary = atom({ plugin: 'token-usage-weather', key: 'summary' } as const, null)
 const limits = atom({ plugin: 'token-usage-weather', key: 'limits' } as const, null)
+const refreshError = atom({ plugin: 'token-usage-weather', key: 'refreshError' } as const, null)
 
 // 오늘 사용량(캐시 제외 input + output) 기준 날씨
 const FORECASTS = [
@@ -53,17 +54,29 @@ const toLimits = (windows: SessionRateLimit[]): Limits => ({
 
 let isRefreshing = false
 
-// 기록 파일을 집계하는 스크립트를 돌려 요약을 세션 상태에 넣는다. 실패하면 직전 값을 둔다.
+// 실패 이유를 디버그 로그에 남기고 상태에 넣는다. 띠는 직전 요약을 그대로 두고 오류 표시만 붙인다.
+async function fail($: EngineInterface, reason: string) {
+  $.ui.log(`token-usage-weather: 집계 실패: ${reason}`, { to: 'debug' })
+  await update($, refreshError, () => reason)
+}
+
+// 기록 파일을 집계하는 스크립트를 돌려 요약을 세션 상태에 넣는다. 실패하면 직전 값을 두고 오류를 남긴다.
+// isStale: 다른 세션이 집계 중이라 이번엔 저장된 값만 읽었다는 뜻. 다음 갱신 때 따라잡는다.
 async function refresh($: EngineInterface) {
   if (isRefreshing) return
   isRefreshing = true
   try {
     const script = `${$.plugin.root}/scripts/tally.mjs`
-    const { exitCode, stdout } = await $.process.run(['node', script], { timeoutMs: 120_000 })
-    if (exitCode !== 0) return
-    const { today, week, total, since } = JSON.parse(stdout) as Summary
-    await update($, summary, () => ({ today, week, total, since }))
-  } catch {
+    const { exitCode, stdout, stderr } = await $.process.run(['node', script], { timeoutMs: 120_000 })
+    if (exitCode !== 0) {
+      await fail($, `exit ${exitCode}: ${stderr.trim().slice(0, 500)}`)
+      return
+    }
+    const { today, week, total, since, isStale } = JSON.parse(stdout) as Summary
+    await update($, summary, () => ({ today, week, total, since, isStale: isStale === true }))
+    await update($, refreshError, () => null)
+  } catch (err) {
+    await fail($, err instanceof Error ? err.message : String(err)).catch(() => {})
   } finally {
     isRefreshing = false
   }
@@ -101,6 +114,7 @@ export const register: Register = on => {
       return next(e)
     }
     const l = await read($, limits)
+    const error = await read($, refreshError)
 
     const { Box, Text } = $.ui.resolve(e)
     const f = forecast(s.today)
@@ -117,6 +131,7 @@ export const register: Register = on => {
         <Text dimColor>{'  │  '}</Text>
         <Text>누적 {compact(s.total)}</Text>
         {isWide ? <Text dimColor>{'  '}(D+{daysSince(s.since, today)})</Text> : null}
+        {error !== null ? <Text dimColor>{'  '}(집계 오류)</Text> : null}
         {fiveHour !== null || weekly !== null ? <Text dimColor>{'  │  '}</Text> : null}
         {fiveHour === null ? null
           : fiveHour >= WARN

@@ -66,3 +66,40 @@ test('no limits, no limit section', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /강수|주간/ })).toBeUndefined()
   await ui.unmount()
 })
+
+// 집계 스크립트가 실패하면 디버그 로그에 남기고, 띠는 직전 요약에 오류 표시를 붙인다
+test('a failed tally is logged and marked on the band', async ($, on) => {
+  const logs: string[] = []
+  on('state.get', (_, e, next) => e.key === 'summary'
+    ? { value: { value: SUMMARY, version: 1 } }
+    : next(e))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('process.run', () => ({
+    value: { exitCode: 1, stdout: '', stderr: 'boom', isStdoutTruncated: false, isStderrTruncated: false },
+  }))
+  on('ui.log', (_, e) => {
+    logs.push(e.text)
+    return { value: undefined }
+  })
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // 집계는 session.start 뒤에 기다리지 않고 돈다: 띠에 표시가 붙을 때까지 다시 그려 본다
+  let marker
+  for (let i = 0; i < 50 && marker === undefined; i++) {
+    const ui = await $.ui.mount({ ...band(120), surface: 'terminal' } as never)
+    marker = await ui.find({ type: 'Text', text: /집계 오류/ })
+    await ui.unmount()
+  }
+  expect(marker?.text).toBe('  (집계 오류)')
+  expect(logs.some(l => l.includes('boom'))).toBe(true)
+})
+
+test('a successful tally shows no error marker', async ($, on) => {
+  on('state.get', (_, e, next) => e.key === 'summary'
+    ? { value: { value: SUMMARY, version: 1 } }
+    : next(e))
+
+  const ui = await $.ui.mount({ ...band(120), surface: 'terminal' } as never)
+  expect(await ui.find({ type: 'Text', text: /집계 오류/ })).toBeUndefined()
+  await ui.unmount()
+})

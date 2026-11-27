@@ -35,6 +35,8 @@ Claude Code 프롬프트 위에 **오늘 토큰 사용량을 날씨로**, 그리
 - 같은 응답이 기록에 여러 줄로 저장되므로 `message.id`로 중복을 제거합니다.
 - 세션이 시작될 때와 메인 턴이 끝날 때마다 `scripts/tally.mjs`를 실행해 새로 추가된 줄만 이어서 읽습니다.
 - 집계 상태는 `~/.claude/token-usage-weather/state.json`에 저장됩니다. 이 파일을 지우면 처음부터 다시 셉니다.
+- 날짜는 한국 시간(UTC+9) 자정에 바뀝니다. 다른 시간대를 쓰려면 환경변수 `TOKEN_USAGE_WEATHER_UTC_OFFSET`에 UTC와의 차이를 시간 단위로 넣으세요 (예: `0`, `-5`, `5.5`). 이미 쌓인 날짜별 합계는 다시 나누지 않습니다.
+- 집계가 실패하면 띠에 `(집계 오류)`가 붙고 이유는 디버그 로그(`claude --debug`)에 남습니다.
 
 ## 설치
 
@@ -59,3 +61,18 @@ claude plugin install token-usage-weather --marketplace namyoungjun96/token-usag
 ## 날씨 기준 바꾸기
 
 `hooks/register.tsx`의 `FORECASTS` 배열에서 기준값과 아이콘을 고치면 됩니다.
+
+## 개발
+
+테스트:
+
+```
+node --test tests/tally.test.mjs   # 집계 스크립트 (scripts/tally-core.mjs)
+claude plugin test .               # 띠 (tests/*.test.tsx)
+```
+
+타입 체크: `tsconfig.json`이 읽는 `.claude-plugin/types/`(Claude Code API 선언)는 Claude Code가 이 모드를 불러올 때 만들어 주는 파일이라 저장소에 넣지 않습니다 (`.gitignore`). 클론한 뒤 이 폴더에서 대화형 세션을 한 번 열면(`claude --plugin-dir .`, 열리면 바로 닫아도 됩니다) 생성되고, 그다음부터 타입 체크가 됩니다.
+
+```
+npx -p typescript tsc -p .
+```
